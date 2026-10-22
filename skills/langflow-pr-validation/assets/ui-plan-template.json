@@ -1,0 +1,32 @@
+{
+  "plan_id": "<TICKET>-ui",
+  "title": "<TICKET> — <feature>",
+  "subtitle": "<Jira summary, one line>",
+  "tickets": [
+    { "label": "Jira <TICKET>", "url": "https://datastax.jira.com/browse/<TICKET>" },
+    { "label": "PR #<N>", "url": "https://github.com/langflow-ai/langflow/pull/<N>" }
+  ],
+  "pr_summary": [
+    "3-4 bullets: what the PR does, as Alice can observe it on screen.",
+    "On a re-test: what changed since the last round and which finding each fix addresses."
+  ],
+  "environment": {
+    "UI": "http://localhost:<port>",
+    "Login": [
+      { "role": "admin", "user": "<user>", "password": "<password>", "note": "<optional: route or host, e.g. /login/break-glass, ana.localhost:7864>" }
+    ],
+    "<Asset she must use, e.g. OpenSearch>": "<URL — user / password — already configured in the platform>"
+  },
+  "notes": [
+    "<= 5 one-liners, only what prevents a false bug report: expected failures, the mini model to select, traps."
+  ],
+  "items": [
+    {
+      "id": "UI-001",
+      "area": "<screen / tab>",
+      "actions": "<the clicks>",
+      "expected": "<the observable result, with the exact strings to compare>",
+      "attention": false
+    }
+  ]
+}
