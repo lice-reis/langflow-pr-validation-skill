@@ -3,9 +3,9 @@ name: langflow-pr-validation
 description: >
   Langflow PR validation orchestrator driven by a Jira ticket. Given a Jira link/ID (or a PR
   number) it reads the ticket via the qa-platform MCP, finds the linked PR, analyzes the diff,
-  brings the PR up in a claimed worktree slot with one command (wt_up), runs the API checks,
-  hands Alice an interactive UI test plan, writes the findings doc for the dev and registers the
-  checklist run on the QA request. Use it whenever the user wants to validate/QA a Langflow PR or
+  brings the PR up in a claimed worktree slot with one command (wt_up), hands Alice an interactive
+  UI test plan as soon as the instance is up while background subagents run the API checks and the
+  fail-before, writes the findings doc for the dev and registers the checklist run on the QA request. Use it whenever the user wants to validate/QA a Langflow PR or
   Jira ticket, test a Langflow branch, or build a test plan for Langflow changes. Also triggers
   on: "valida esse ticket", "valida essa PR", "testar PR", "test PR", "QA dessa PR", "plano de
   teste", "link do jira", "LE-XXXX", "langflow.works/tasks", and any Langflow + PR / Jira +
@@ -31,7 +31,7 @@ Test what the Jira description and the PR promise. Nothing else unless she asks.
 - Jira has "Steps to Reproduce" → run them **literally first**, with the ticket's own values.
   Variants and edge cases come after, never instead.
 - Bugfix PR → **one** fail-before check: show the bug on the parent commit, then the fix
-  (recipe in § 2). Feature PR → no fail-before.
+  (fail-before lane, § 3). Feature PR → no fail-before.
 - Run the PR's **own** test files once. Not the whole suite, not a baseline on `main`.
 - Do **not**: check CI, hunt for reverts, grep other branches, root-cause a failure, measure
   things the ticket does not claim, run provider smoke tests. Something outside scope looks
@@ -49,6 +49,21 @@ Test what the Jira description and the PR promise. Nothing else unless she asks.
 - When something looks wrong and you don't know why: `grep -i <keyword> ${SKILL_DIR}/references/gotchas.md`
   (EE: `~/Langflow/.claude/skills/langflow-enterprise-qa/references/ee-gotchas.md`). Do not read
   those files top to bottom.
+
+## Order — Alice starts testing early (Alice, 2026-11-04)
+
+```
+§0 ticket → §1 PR + diff + test list ──► §2 wt_up in the background
+                                          meanwhile: §4 plan JSON + asset containers
+READY ──► assets configured in the instance ──► spawn the §3 lanes ──► runner ──► HAND-OVER
+                                                  ├─ API lane: PR's own tests + API-xxx
+                                                  └─ fail-before lane (bugfix): base slot
+Alice tests ‖ lanes run ──► both in ──► §5 findings doc ──► §6 platform
+```
+The hand-over waits only for what her clicks need: the instance READY, the assets of the UI items
+and the runner. Nothing only the API or fail-before lanes need ever delays it, and no lane touches
+the instance in a way she would notice. No UI item → no plan and nothing to race: run § 3 inline in
+the main thread, fail-before on your own slot (the deferred recipe).
 
 ## 0 · Ticket → PR
 
@@ -83,6 +98,11 @@ Jira, the assets the tests need (§ 4 — you provide them), `HAS_API` / `HAS_UI
 endpoint the UI calls — in doubt, yes), and the test list with ids (`API-001…`, `UI-001…`). Then go
 straight to § 2 — do not wait for an answer.
 
+Write the decided list to the scratchpad as `<JIRA>-tests.md` before § 2: every `API-` id with its
+request and expected result, every `UI-` id, the PR's own test files, the assets, and for a bugfix
+the **parent commit** (merged PR: `<merge>^1`; open PR: `git merge-base origin/<base> pr-<N>`) plus
+the reproduction that shows the bug. The § 3 briefs point to this file instead of retyping it.
+
 ## 2 · Environment — one command (OSS PRs)
 
 **EE PR → not this section.** `source ~/Langflow/pr-validation/_specs/ee-worktree.sh && ee_up LE-XXXX <pr>`
@@ -90,9 +110,10 @@ straight to § 2 — do not wait for an answer.
 Same pool model (`ee1`…`ee5`), same exit codes (3 = pool full, 4 = instance cap) and the same questions.
 
 ```bash
-source ~/Langflow/pr-validation/_specs/worktree-claim.sh && wt_up LE-XXXX <pr>   # Bash timeout 600000
+source ~/Langflow/pr-validation/_specs/worktree-claim.sh && wt_up LE-XXXX <pr>   # run_in_background: true
 ```
-`wt_up` claims a free slot of the **pool** (`active` 7862, `active2` 7864, `active3` 7830, `active4`
+Run it in the **background** and write the plan JSON (§ 4) while it builds; you are notified when it
+exits (READY, or exit 3 / 4 below). `wt_up` claims a free slot of the **pool** (`active` 7862, `active2` 7864, `active3` 7830, `active4`
 7832, `active5` 7834 — permanent, deps already installed), fetches `pull/N/head`, `checkout -B pr-N-qa`,
 scrubs the slot state, writes `.env` (`wt_env`: per-slot config dir + knowledge-bases dir), runs
 `make run_clic port=$PORT`, waits for `/api/v1/version` and proves a Credential write returns 201. It
@@ -115,7 +136,9 @@ prints slot, URL, HEAD and the log paths. Branch tip instead of a PR: `wt_up --r
 - Probe fails or build dies → stop and report; don't self-fix.
 - Timed out while still building (first run on a slot is cold) → `wt_wait`.
 - Every later Bash call is a new shell: start it with
-  `source ~/Langflow/pr-validation/_specs/worktree-claim.sh && wt_mine || exit 1`.
+  `source ~/Langflow/pr-validation/_specs/worktree-claim.sh && wt_mine LE-XXXX || exit 1` — always
+  with the ticket, because the fail-before lane holds a second slot (`LE-XXXX-base`) for the same
+  session. Subagents share the session id, so the same line works inside them.
 - **Ports are never picked by hand.** `wt_up`/`ee_up` allocate them (`lsof` + the claim/`.own`/`.qa-port`
   registries) and `wt_mine`/`ee_env` give them back; talk only to `$PORT`. Never hand-roll a worktree or
   a `langflow run` on a port you chose — if the helper fails, stop and report. Before any unavoidable
@@ -126,13 +149,51 @@ prints slot, URL, HEAD and the log paths. Branch tip instead of a PR: `wt_up --r
 - Needs a Postgres/pgvector driver or another uv extra → `wt_up --extras "postgresql pgvector" LE-XXXX <pr>`
   (`make run_clic` strips extras; the flag re-adds them and relaunches via `.venv/bin/langflow`, where
   they survive). Never `uv pip install` by hand and never tell Alice about it.
-- **Fail-before (bugfix PRs):** after the build is up, `git -C "$WT" checkout <parent> -- <files>`
-  → `wt_restart` (backend) or run the PR's test file (frontend/unit) → observe the bug →
-  `git -C "$WT" checkout HEAD -- <files>` → `wt_restart`. Never swap files while a build runs.
-  Saved flows embed component code — create the flow on the build you are testing.
+- Fail-before runs in its own lane (§ 3), never on Alice's slot while she tests.
 - Hand-over to Alice: slot + `http://localhost:$PORT`. Details: `_specs/worktree-checkout.md`.
 
-## 3 · API checks (inline, no subagent)
+## 3 · Automated lanes — background subagents while she tests
+
+Spawn them right after the instance is READY and the shared assets are configured, **before** the
+runner goes up (§ 4): `Agent`, `subagent_type: general-purpose`, in the background, one per lane, in
+a single message. Each brief names the ticket, the PR, the absolute path of `<JIRA>-tests.md`, the
+line `source …/worktree-claim.sh && wt_mine LE-XXXX`, and tells it to read this file's **Scope** and
+**§ 3** first. Assets only a lane needs are provisioned by that lane.
+
+**API lane** (PR test files or any `API-` id) — on Alice's instance, while she clicks in it:
+- Runs the PR's **own** test files once, then every `API-` id, with the snippet below.
+- Bugfix only in `src/frontend` whose own jest test shows the bug → this lane does the fail-before,
+  right after that test run and never while another test runs in the worktree:
+  `git -C "$WT" checkout <parent> -- <source files>` → run the test file →
+  `git -C "$WT" checkout HEAD -- <source files>`. Her server serves the bundle built at `wt_up`, so
+  she sees nothing. Backend files are never swapped in her slot while she tests.
+- Never `wt_restart` / `wt_down` / `wt_up` on her slot, never edits `.env`, never deletes or changes
+  data the plan's `environment` lists. Everything it creates is named `API-00N …` so she can tell it
+  apart in the UI. A check that needs a restart or another config is not run: it comes back
+  `deferred` with the reason.
+- Returns one line per id — `API-001 | pass|fail|warning|blocked|deferred | <observed, one
+  sentence>` — plus, for every fail/warning, Description, Expected Behavior and Steps to Reproduce in
+  English, ready for the findings doc. Nothing in `files/`; scratch in the scratchpad.
+
+**Fail-before lane** (every other bugfix PR) — never on her slot:
+- `wt_up --ref <parent> LE-XXXX-base parent` (Bash timeout 600000; timed out while building →
+  `wt_wait`) claims a second pool slot at the parent commit, with its own DB; later shells use
+  `wt_mine LE-XXXX-base`. It queues on the build lock, which is why the lane starts only after her
+  build is READY. Runs the reproduction from `<JIRA>-tests.md` there, expects the bug, then
+  `qa_cleanup LE-XXXX-base` at once: the base slot is scrubbed and released, nothing kept.
+- `wt_up` exits 3 (pool full) or 4 (instance cap) → no question, no `--take`, no `--over-cap`:
+  returns `deferred`.
+- Returns `FAIL-BEFORE | reproduced|not reproduced|deferred | <parent sha>: <what was observed>`.
+
+**Deferred recipe** (runs after she submits, on her slot, before § 5): `git -C "$WT" checkout
+<parent> -- <files>` → `wt_restart` → observe the bug → `git -C "$WT" checkout HEAD -- <files>` →
+`wt_restart`. Never swap files while a build runs. Saved flows embed component code — create the
+flow on the build you are testing. A deferred API check runs the same way, after her submission.
+
+**When a lane reports:** append its rows to the findings doc (started at the first fail), then one
+line in chat — `API: 6/6 pass`, `API-003 falhou: <one line>`, `Fail-before: bug reproduzido no pai
+<sha>`. A result that changes what she must do (the fix does not work at all, the instance went
+down) says what to do in that same line, at once. No recap, no list.
 
 ```bash
 B=http://localhost:$PORT
@@ -147,7 +208,8 @@ scripts, fixtures, flow JSONs, API dumps and logs stay in the **scratchpad** —
 
 ## 4 · UI plan — interactive runner
 
-Write `files/plan-<JIRA>-ui.json` from `${SKILL_DIR}/assets/ui-plan-template.json`, in PT-BR, terse:
+Write it **while `wt_up` builds** (§ 2) — it needs the test list, not the instance; the UI URL goes
+in when READY prints the port. `files/plan-<JIRA>-ui.json` from `${SKILL_DIR}/assets/ui-plan-template.json`, in PT-BR, terse:
 `environment` = `UI` + `Login` (list form, one object per credential) + one row per provisioned asset
 she must use (URL, user, password, "already configured"); `pr_summary` = 3–4 bullets of
 what she can see on screen; `notes` ≤ 5 one-liners, only what prevents a false bug report (expected
@@ -165,17 +227,20 @@ fixture file, seeded users), **provision it, configure it in the instance, verif
 call, and write URL / user / password in `environment`** before the plan goes out. "Connect
 OpenSearch" is never an item; "select the OpenSearch provider — already configured" is. Cannot be
 provided → the item is `blocked` with the reason. Recipes per asset: `${SKILL_DIR}/references/test-assets.md`.
+Containers and fixtures that do not need the instance start during the build too; configuring them
+in the instance and the verifying call come right after READY.
 Every container, volume or network you create is named **`qa-<ticket>-<svc>`** — that name is what
 `qa_cleanup` removes at sign-off (pre-authorized; the general "no `podman rm`" rule is about
 everything else). Reuse the standing fixtures (`lf-qa-opensearch`, `testbed-http`) instead of
 creating your own when they fit.
 
+Assets verified → spawn the § 3 lanes and start the runner in the same message:
 ```bash
 ( nohup python3 ${SKILL_DIR}/assets/ui-plan-runner.py --plan files/plan-<JIRA>-ui.json \
     > files/.runner.log 2>&1 < /dev/null & ); sleep 1; grep Abra files/.runner.log
 ```
-No `--port`: the runner derives a stable one per `plan_id`. **Hand-over message — this shape and
-nothing else:**
+No `--port`: the runner derives a stable one per `plan_id`. The hand-over goes out as soon as the
+runner answers — never after a lane. **Hand-over message — this shape and nothing else:**
 ```
 Plano: http://localhost:8922 — 7 itens. Login: langflow (sem senha).
 <one line she must know, only if there is one — e.g. "Não reinicie o Langflow: a senha do destino só vive na memória.">
@@ -192,9 +257,12 @@ doc, in her wording, with her attachments embedded — they are not rows of the 
 ## 5 · Results → findings doc → chat report (no questions in between)
 
 **Trigger:** `files/runs/<plan_id>/results.json` exists (she submitted), or she says "enviei" /
-"testes enviados", or she sends findings in chat. Then, in this order, without asking anything:
+"testes enviados", or she sends findings in chat. A lane still running → wait for its report without
+a word (you are notified; never poll); `deferred` items run now on her slot (§ 3 deferred recipe).
+Then, in this order, without asking anything:
 
-1. Read `results.json`, its `extras[]` and `attachments/`; `Read` each image so the caption is right.
+1. Read `results.json`, its `extras[]` and `attachments/`, and the lane reports; `Read` each image
+   so the caption is right.
 2. Write `files/<JIRA>-qa-findings.md` — **English, always**, format in
    `${SPECS}/findings-doc.template.md`: the `ID | Test | Result` table of every test that ran (API +
    every plan item), then `### F1 — Title` findings ordered by user impact, each with **Description**
@@ -276,7 +344,8 @@ slip is `pass`/`na` with a note, not a `fail`.
   keeps the claim, DB and checkout for the re-test (`wt_restart` / `ee_restart` resumes). It does not
   release: a released slot must be a clean one. Pausing also frees room under the 4-instance cap.
 - **Alice's sign-off** (she commented the PR and the checklist is registered, or she says "pode
-  limpar") → `qa_cleanup LE-XXXX`: **everything of the ticket goes** — plan JSON, runner,
+  limpar") → `qa_cleanup LE-XXXX` (plus `qa_cleanup LE-XXXX-base` if a fail-before lane died
+  holding its slot — `wt_status` shows it): **everything of the ticket goes** — plan JSON, runner,
   `files/runs/<plan>/`, `qa-<ticket>-*` containers, and the instance: a **pool
   slot is scrubbed and released, never removed** (`wt_free`: every server in it, DB, `.env` back to
   baseline with a fresh key, config dir + knowledge bases, logs, tree reset to a detached

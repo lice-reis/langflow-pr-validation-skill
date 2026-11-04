@@ -1,5 +1,7 @@
 # langflow-pr-validation (backup)
 
+**Back in use since 2026-11-04** — restored from this repo to `~/Langflow/pr-validation/.claude/skills/`; this copy tracks the live skill.
+
 _Also holds `langflow-instance-migration-qa` (retired 2026-10-26) and `langflow-enterprise-qa` (retired 2026-10-27)._
 
 Backup of Alice's personal `langflow-pr-validation` Claude Code skill, retired on 2026-10-22 in favor of
