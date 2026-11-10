@@ -1,2 +1,10 @@
-config/provider-secrets.env
+# Real API keys / env files — never commit. Only *.env.example is tracked.
+# (No leading path: these match at any depth, e.g. skills/*/config/provider-secrets.env.)
+provider-secrets.env
+.env
+*.env
+!*.env.example
+
+# Local exports and OS noise
+*.zip
 .DS_Store
