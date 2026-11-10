@@ -60,6 +60,39 @@ used once to clear `must_change_password`.) Put it in the UI plan's `Login` list
 - **Personas**: seed via API and log each one in once before handing over the plan (`ee-gotchas.md` →
   "Seed API shapes"); one `*.localhost:<port>` hostname per persona.
 
+## Bugfix repro on the parent (fail-before)
+
+A bugfix whose Jira has Steps to Reproduce is reproduced **exactly**, on the parent and then on the
+PR, with every deviation declared (`langflow-pr-validation` → Scope). Both runs use **the ticket's one
+slot, in sequence**: the parent comes up first, the *before* runs, then the PR comes up on the same
+slot — all before Alice's hand-over (`langflow-pr-validation` → § 2 "Bugfix"). The EE mirror's
+single-branch refspec only knows `main` and the PR heads already fetched, so fetch the base branch and
+the PR head before looking for the parent:
+
+```bash
+source ~/Langflow/pr-validation/_specs/ee-worktree.sh && _ee_path      # GH_HOST=github.ibm.com
+M=$EE_MIRROR; R=WatsonOrchestrate/IBM-Langflow
+B=$(gh pr view <pr> --repo $R --json baseRefName -q .baseRefName)
+git -C "$M" fetch -q origin "$B:refs/remotes/origin/$B" "pull/<pr>/head:refs/remotes/origin/pr-<pr>" --force
+P=$(git -C "$M" merge-base "origin/$B" "origin/pr-<pr>")                # open PR
+# merged PR: P=$(git -C "$M" rev-parse "$(gh pr view <pr> --repo $R --json mergeCommit -q .mergeCommit.oid)^1")
+git -C "$M" show "$P:oss-version" | cut -c1-8                           # the OSS pin the "before" runs
+ee_up --ref "$P" [her flags, never --merge-main] LE-XXXX parent         # Bash timeout 600000
+# … the before run on this instance …
+ee_up --fresh [her flags] LE-XXXX <pr>                                   # same slot: PR head, new DB
+```
+
+- The parent carries its own `oss-version`: `ee_up` moves the slot's frontend mirror to it when it
+  differs (APFS clone from a same-pin sibling, else ~3 min cold), and back to the PR's pin on the
+  second `ee_up`. The "before" is the EE code **and** the OSS pin the bug was reported on — a fix that
+  arrives through a pin bump is reproduced too. Record both pins in the `REPRO` result.
+- Same setup on both builds: the same `--sso`; lines appended to `qa-run.env` survive the second
+  `ee_up` (the file is kept); what lives in the DB — licence, SSO config, personas — is configured
+  again after `--fresh`. Login `admin` / `Qa-LE-XXXX-admin` on both.
+- Never `--merge-main` on the parent (`origin/main` may already hold the fix). The parent does not
+  build or start → stop and report; a file swap on the PR build never stands in for the parent
+  (`ee_restart` neither rebuilds the overrides bundle nor re-pins OSS).
+
 ## Lifecycle
 
 Re-test after a push: `ee_up LE-XXXX <pr>` again (same slot, new head, DB kept). Backend-only

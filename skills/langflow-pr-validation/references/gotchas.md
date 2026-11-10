@@ -174,6 +174,15 @@ Each entry: symptom → cause → what to do. Dates are when it was last confirm
   = request admitted + vertex built; post-fix = `400 "This flow cannot be executed."` and no build.
 - **UI on the same port** (`run_clic`): any unknown `/api/v1/...` path is GET 404 but POST/DELETE
   405 (the SPA catch-all allows HEAD, GET). "Route not mounted → 404" holds for GET, or backend-only.
+- **Every decision run takes ~120 s while chat models answer in 1 s** (LE-3117, 2026-11-06): this
+  Mac's IPv6 route to api.openai.com timed out (`curl -6 … ` rc 28), and the decision client tries
+  each IPv6 address before IPv4; curl/browsers fall back at once. Process-local fix: a
+  `sitecustomize.py` on `PYTHONPATH` that sorts `socket.getaddrinfo` IPv4-first, then
+  `export PYTHONPATH=…; wt_restart` (the launcher inherits the shell env; `.env` is too late).
+- **Provider errors on demand without product code**: the same `sitecustomize.py` can wrap
+  `httpx.Client.send`/`AsyncClient.send` and raise `httpx.ConnectError` / `ReadTimeout` when the
+  request body contains a marker (`QA-NETWORK-DOWN`, `QA-TIMEOUT`), so Alice triggers an
+  operational error by typing the marker in the Playground. Verify with one `/run` per marker.
 
 ## API-built flows (so the canvas and Alice see what the API sees)
 
@@ -369,3 +378,30 @@ Each entry: symptom → cause → what to do. Dates are when it was last confirm
 - The 1.12.7 Docker image already requires `LANGFLOW_SUPERUSER`/`PASSWORD` (AUTO_LOGIN=false in the image), so
   the Docker upgrade path is "same env on the rc image" — the auto-login recovery path only applies to wheels.
 - `zsh`: `$RANDOM` inside `VAR=$RANDOM cmd | tail` in a loop repeats (subshell); `set -- $X` does not split.
+- UI runner `results.json`: Alice's comment on a fail/warning/blocked item is in `items[].description` (the
+  required detail box); `note` is the optional "Observação" box. Read both — reading only `note` made a whole
+  plan look uncommented (LE-3198).
+
+- **Trigger listener dies with `[Errno 48] … 127.0.0.1:7861`** (`LANGFLOW_LISTENERS_MODE=subprocess`): the listener health server defaults to 7861 (= active2's `DEV_API_PORT`) and another slot's listener may already hold it. Append `LANGFLOW_LISTENERS_HEALTH_PORT=$DEV_UI_PORT` (from `wt_dev_ports`) to `$WT/.env` + `wt_restart`. Never kill the other slot's listener.
+- **`wt_restart` orphans a subprocess trigger listener** (`LANGFLOW_LISTENERS_MODE=subprocess`): the API dies with `kill -9`, the old `langflow listeners` child keeps the health port with the old env and the new one exits 1. For config changes in that mode use `wt_down` then `wt_restart` (LE-3192).
+
+## Trigger listeners, public tunnels, Telegram (LE-3199, 2026-11-09)
+
+- Orphaned subprocess listener after `wt_restart`: see the LE-3192 line above (`wt_down` then `wt_restart`).
+- **Mac sleep freezes listeners and kills quick tunnels**: polling stops (`last_fetch_at` stalls,
+  `ProviderUnavailableError` at DarkWakes) and the `trycloudflare.com` URL stops resolving. Recreate the
+  tunnel, update `LANGFLOW_TRIGGER_INGRESS_ORIGIN`, `wt_restart`, re-enable push triggers.
+- **Public webhook ingress = cloudflared quick tunnel → Caddy path filter → slot.** Needs Alice's OK
+  (the classifier blocks it). Caddy site address must be `http://:PORT` + `bind 127.0.0.1`: a
+  host-qualified address answers **empty 200** to the tunnel's Host, so providers think delivery
+  succeeded. Verify: ingress path → Langflow 404 JSON, `/api/v1/auto_login` → 404.
+- **Real provider events need a human**: a bot never sees another bot's messages, so triggers cannot be
+  fired by a bot and a bot cannot reply to another bot's message ("message to be replied not found").
+  Forged webhook updates must target a message a human sent.
+- `/api/v1/run` returns `outputs: []` for a flow with no output vertex — add a Chat Output to read an
+  action component's result.
+- **WhatsApp trigger stuck on "This app/WABA already has a receiver"** with no trigger Active: a Resume
+  that failed (e.g. tunnel down, Meta could not verify the callback) leaves its app/WABA reservation
+  `pending` in `trigger_subscription`. Pause/disable that failed trigger (`POST /api/v1/triggers/<id>/disable`)
+  to expire it, fix the tunnel/`LANGFLOW_TRIGGER_INGRESS_ORIGIN`, then Resume. A new tunnel URL also needs
+  `wt_restart`, after which open browser tabs get 401 until reloaded. (LE-3198, 2026-11-09)

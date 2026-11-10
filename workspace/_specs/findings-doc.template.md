@@ -22,7 +22,10 @@ ruled out stay in chat.
 | UI-004 | Clean Data toggle on a single Table — see F2 | Fail |
 ```
 
-- `ID` = the id the test already had (`API-001…`, `UI-001…`); never renumber.
+- `ID` = the id the test already had (`REPRO`, `API-001…`, `UI-001…`); never renumber.
+- Bugfix with Jira Steps to Reproduce → a `REPRO` row first, `Test` = just `Jira repro` (`Jira repro
+  (not exact)` when it was not). Never the steps, the channels, the shas or the deviations in that
+  cell (Alice, 2026-11-09: the row must stay short); the deviations go in chat and in the checklist.
 - `Test` = one short line, what was exercised. A failed row may point at its finding (`— see F2`).
 - `Result` = **Pass** / **Fail**; `Warning` / `N/A` / `Blocked` only when the UI runner reported it.
 - Every item in `files/runs/<plan_id>/results.json` and every API test run appears exactly once.

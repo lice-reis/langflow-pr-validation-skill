@@ -148,6 +148,17 @@ Traps met in real Enterprise QA runs. `grep -i -A4 <keyword>`. Dates = last conf
   as `run_id`. The JWKS client ignores the repo's `tls_trust` helper → an internal-CA JWKS gives a
   permanent 503 `directory_trust_unavailable`; `SSL_CERT_FILE` doesn't help (httpx uses certifi) and
   breaks `uv` — use a public-chained cert or a combined bundle.
+- **Generic SCIM (bearer) needs an HTTPS SSO issuer** (LE-2441, release-1.14.0): `PUT …/connection`
+  with `sso_issuer: http://…` is refused: "sso_issuer must be an HTTPS URL…". The oidc mock is HTTP-only:
+  run a scratch copy patched to `https://{host}` + `ssl.wrap_socket` on 5558 with a local CA, and set
+  `LANGFLOW_OIDC_CA_BUNDLE=<ca.pem>` (the SSO OIDC client honours it). Python 3.13 strict X.509: the
+  leaf needs `subjectKeyIdentifier` + `authorityKeyIdentifier`, else "certificate verify failed".
+  An enabled SSO connection only edits its display name → `PATCH {enabled:false}`, edit, test-login.
+  `sso_provider_key` = the SSO connection `slug`. Generic flow: PUT → token → **validate** → enable.
+  Once the connection is in preview, every SSO login of that issuer goes through the directory: a
+  user with no active SCIM record (even the admin.idp that verified SSO) gets
+  `/login?error=authentication_failed`. One connection per deployment → run lifecycle/CLI/Entra
+  checks on a second slot (`ee_up … LE-XXXX-api`), never on Alice's.
 
 ## Frontend and tests
 

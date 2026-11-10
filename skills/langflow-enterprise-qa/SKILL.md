@@ -129,6 +129,9 @@ Runbook: [references/checkout-and-validate.md](references/checkout-and-validate.
 
 **Step 4 — Validate.** Run the checks for the scope; reproduce any numbers the author cited. Record
 **which OSS pin** and **which DB backend** were active — a result is meaningless without them.
+Bugfix with Jira Steps to Reproduce → the parent comes up **first** on the ticket's one slot (its own
+pin), the exact repro runs there, then `ee_up --fresh` brings the PR up on the same slot:
+[checkout-and-validate.md → "Bugfix repro on the parent"](references/checkout-and-validate.md).
 
 **Step 5 — Report.** English, concise, failures/bugs only (no NITs). Honor the QA-platform rules below.
 
@@ -136,6 +139,9 @@ Runbook: [references/checkout-and-validate.md](references/checkout-and-validate.
 - 🌿 **Pool slot, never the mirror**; keep it while in QA (`ee_down` = pause), and at sign-off
   `qa_cleanup` scrubs and frees the slot (never removes it).
 - 🧾 **Jira description is the spec**; diff = what changed, Jira = what must work.
+- 🛑 **Bugfix with Steps to Reproduce → reproduce exactly as reported**, before (parent) and after
+  (PR), the same steps both times; any deviation is declared ("Não reproduzi exatamente os passos do
+  bug: …"). Full rule: `langflow-pr-validation` → Scope.
 - 🟢 **QA platform write is bounded:** register checklist runs/results on the existing request;
   **never create** a QA request; **never move** its status; **notify Alice before** a checklist run.
 - 🖥️ **GitHub reads only** (`gh pr view/diff`). **Never** comment/approve/merge/modify EE **or** OSS

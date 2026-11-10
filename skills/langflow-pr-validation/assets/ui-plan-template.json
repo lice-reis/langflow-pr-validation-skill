@@ -24,8 +24,8 @@
     {
       "id": "UI-001",
       "area": "<screen / tab>",
-      "actions": "<the clicks>",
-      "expected": "<the observable result, with the exact strings to compare>",
+      "actions": "<the full route: screen → clicks, in order>",
+      "expected": "<every checkpoint along the route, in order, with the exact strings to compare>",
       "attention": false
     }
   ]
