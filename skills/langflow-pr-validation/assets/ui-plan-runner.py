@@ -149,6 +149,80 @@ def md_inline(text: str) -> str:
     return out
 
 
+def _as_list(value) -> list[str]:
+    """A step's `expect` may be one string or a list of checks."""
+    if not value:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(v).strip() for v in value if str(v).strip()]
+    return [str(value).strip()]
+
+
+def _split_route(text: str) -> list[str]:
+    """Legacy plans wrote a whole route on one line, joined by '→'. Break it into
+    one line per step so old plans read vertically too."""
+    parts = [p.strip().rstrip(".").strip() for p in re.split(r"\s*→\s*", text or "")]
+    return [p for p in parts if p]
+
+
+def _checks_html(checks: list[str]) -> str:
+    if not checks:
+        return ""
+    return '<ul class="exp">' + "".join(f"<li>{md_inline(c)}</li>" for c in checks) + "</ul>"
+
+
+def _steps_html(it: dict) -> str:
+    """Render an item as a vertical, numbered walk-through.
+
+    Preferred shape (one action per step, the checkpoint right under it):
+        "start": "Logada como maria.local, em Settings › General",
+        "steps": [ {"do": "Clique **Connect**", "expect": ["...", "..."]}, ... ]
+    A step may also be a plain string (an action with nothing to check yet).
+    Legacy shape: `actions` / `expected` strings, split on '→' into two lists.
+    """
+    start = it.get("start")
+    start_html = (
+        f'<div class="field"><span class="lbl">Começa em</span>'
+        f'<p class="start">{md_inline(str(start))}</p></div>'
+    ) if start else ""
+
+    steps = it.get("steps")
+    if isinstance(steps, list) and steps:
+        rows = []
+        for s in steps:
+            if isinstance(s, dict):
+                do = s.get("do") or s.get("action") or ""
+                checks = _as_list(s.get("expect") or s.get("expected"))
+            else:
+                do, checks = str(s), []
+            rows.append(f'<li><div class="do">{md_inline(str(do))}</div>{_checks_html(checks)}</li>')
+        return (start_html
+                + '<div class="field"><span class="lbl">Passo a passo '
+                  '<span class="legend">— faça a ação, depois confira o que está marcado com ✓</span></span>'
+                + f'<ol class="steps">{"".join(rows)}</ol></div>')
+
+    actions = _split_route(it.get("actions", ""))
+    expected = _split_route(it.get("expected", ""))
+    acts = "".join(f'<li><div class="do">{md_inline(a)}</div></li>' for a in actions)
+    return (start_html
+            + f'<div class="field"><span class="lbl">Ações</span><ol class="steps">{acts}</ol></div>'
+            + f'<div class="field"><span class="lbl">Resultado esperado</span>{_checks_html(expected)}</div>')
+
+
+def _expected_text(spec: dict) -> str:
+    """Plain-text expected result for results.json (findings doc / checklist)."""
+    steps = spec.get("steps")
+    if isinstance(steps, list) and steps:
+        lines = []
+        for n, s in enumerate(steps, 1):
+            if isinstance(s, dict):
+                checks = _as_list(s.get("expect") or s.get("expected"))
+                if checks:
+                    lines.append(f"{n}. " + "; ".join(checks))
+        return "\n".join(lines)
+    return spec.get("expected", "")
+
+
 def _chip(label: str, value: str) -> str:
     """One copyable, independently-selectable credential value."""
     v = html.escape(str(value))
@@ -248,8 +322,7 @@ def render(plan: dict) -> str:
     <span class="state" data-state></span>
   </header>
   <div class="body">
-    <div class="field"><span class="lbl">Ações</span><p>{md_inline(it.get('actions',''))}</p></div>
-    <div class="field"><span class="lbl">Resultado esperado</span><p>{md_inline(it.get('expected',''))}</p></div>
+    {_steps_html(it)}
     <div class="choices" role="radiogroup" aria-label="Resultado de {iid}">
       <label class="ch pass"><input type="radio" name="s-{iid}" value="pass"><span>Passou</span></label>
       <label class="ch fail"><input type="radio" name="s-{iid}" value="fail"><span>Falhou</span></label>
@@ -259,7 +332,7 @@ def render(plan: dict) -> str:
     </div>
     <div class="detail" hidden>
       <label class="dlbl" for="d-{iid}">O que aconteceu <span class="req">— obrigatório</span></label>
-      <textarea id="d-{iid}" rows="4" placeholder="O que você viu, e em que ponto. Se houve mensagem de erro, cole o texto exato."></textarea>
+      <textarea id="d-{iid}" rows="4" placeholder="Em qual passo (número) e o que você viu. Se houve mensagem de erro, cole o texto exato."></textarea>
       <label class="dlbl" for="f-{iid}">Anexos <span class="opt">— print, vídeo ou PDF (pode arrastar; escolha de novo para somar)</span><span class="fcount" data-fcount></span></label>
       <input type="file" id="f-{iid}" multiple accept="image/*,video/*,application/pdf">
       <ul class="files" data-files></ul>
@@ -344,6 +417,25 @@ def render(plan: dict) -> str:
   .lbl {{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:.07em;
     color:var(--muted); margin-bottom:3px }}
   .field p {{ margin:0 }}
+  .field + .field {{ margin-top:12px }}
+  .lbl .legend {{ text-transform:none; letter-spacing:0; font-size:11.5px; opacity:.85 }}
+  .start {{ font-size:14px; padding:6px 10px; background:var(--panel2); border-radius:6px;
+    border-left:3px solid var(--accent) }}
+  /* One step per row: the action, and right under it what to check. */
+  ol.steps {{ list-style:none; counter-reset:step; margin:4px 0 0; padding:0 }}
+  ol.steps > li {{ counter-increment:step; position:relative; padding:9px 0 9px 38px;
+    border-top:1px solid var(--line) }}
+  ol.steps > li:first-child {{ border-top:none }}
+  ol.steps > li::before {{ content:counter(step); position:absolute; left:2px; top:9px;
+    width:24px; height:24px; border-radius:50%; background:var(--panel2);
+    border:1px solid var(--line); color:var(--muted); font-size:12px; font-weight:600;
+    display:flex; align-items:center; justify-content:center; font-variant-numeric:tabular-nums }}
+  .steps .do {{ font-size:14.5px; line-height:1.5; padding-top:1px }}
+  ul.exp {{ list-style:none; margin:5px 0 0; padding:0 }}
+  ul.exp li {{ position:relative; padding:2px 0 2px 22px; font-size:13.5px; line-height:1.5;
+    color:var(--ink); opacity:.92 }}
+  ul.exp li::before {{ content:"✓"; position:absolute; left:3px; top:2px; color:var(--accent);
+    font-weight:700 }}
   .choices {{ display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 0 }}
   .ch {{ display:inline-flex; align-items:center; gap:6px; padding:7px 13px; cursor:pointer;
     border:1px solid var(--line); border-radius:8px; font-size:13.5px; user-select:none;
@@ -739,7 +831,10 @@ class Handler(BaseHTTPRequestHandler):
         for item in payload.get("items", []):
             spec = by_id.get(item.get("id"), {})
             item["area"] = spec.get("area", "")
-            item["expected"] = spec.get("expected", "")
+            item["expected"] = _expected_text(spec)
+            if spec.get("steps"):
+                item["start"] = spec.get("start", "")
+                item["steps"] = spec["steps"]
             item["attachments"], n = _save_attachments(att_dir, item["id"], item.get("attachments"))
             saved += n
 

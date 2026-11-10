@@ -8,3 +8,7 @@ provider-secrets.env
 # Local exports and OS noise
 *.zip
 .DS_Store
+
+# Python bytecode
+__pycache__/
+*.pyc

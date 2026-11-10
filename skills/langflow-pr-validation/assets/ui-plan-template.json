@@ -24,8 +24,12 @@
     {
       "id": "UI-001",
       "area": "<screen / tab>",
-      "actions": "<the full route: screen → clicks, in order>",
-      "expected": "<every checkpoint along the route, in order, with the exact strings to compare>",
+      "start": "<where she begins: persona + screen, e.g. Logada como maria.local, em Settings › General>",
+      "steps": [
+        { "do": "<ONE action: one click, one typed value, one page to look at — the control in **bold**>",
+          "expect": ["<what she sees right after this step, one check per line, exact strings in quotes>"] },
+        { "do": "<next action — omit expect when there is nothing to check yet>" }
+      ],
       "attention": false
     }
   ]

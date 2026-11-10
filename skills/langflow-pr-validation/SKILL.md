@@ -267,8 +267,35 @@ in when READY prints the port. `files/plan-<JIRA>-ui.json` from `${SKILL_DIR}/as
 `environment` = `UI` + `Login` (list form, one object per credential) + one row per provisioned asset
 she must use (URL, user, password, "already configured"); `pr_summary` = 3–4 bullets of
 what she can see on screen; `notes` ≤ 5 one-liners, only what prevents a false bug report (expected
-failures, the mini model to pick, traps); items: `actions` = the route (screen → clicks, in order),
-`expected` = every checkpoint along it, in order, with the exact strings.
+failures, the mini model to pick, traps); items: `start` + `steps` (below). Never the old
+one-line `actions` / `expected` strings.
+
+**Items are a vertical walk-through** (Alice, 2026-11-10: a whole route on one line joined by "→",
+with the expected results in a second long line, was hard to execute). The runner renders each step
+as a numbered row with its checks right under it:
+- `start` — where she begins, one line: persona + screen ("Logada como maria.local, em Settings ›
+  General"). Not a step.
+- `steps` — one object per action, in order: `do` = **one** action (one click, one typed value, one
+  page or element to look at), the control she clicks in `**bold**`; `expect` = what she must see
+  right after *that* step, a list with one check per line and the exact strings in quotes. A step
+  with nothing to check yet has no `expect`; never park a check on a later step. Each `do` and each
+  check fits on one line — split rather than chain with "→" or ";".
+- ✗ `"actions": "Connect → Cancel → Connect de novo → …"`, `"expected": "Diálogo … → Cancel fecha … → …"`
+- ✓
+  ```json
+  "start": "Logada como maria.local, em Settings › General",
+  "steps": [
+    {"do": "No card 'Connected accounts', clique **Connect**",
+     "expect": ["Abre o diálogo 'Connect to SSO?'",
+                "Texto: 'Connecting to LE-3400 Mock IdP will replace your username…'"]},
+    {"do": "Clique **Cancel**", "expect": ["O diálogo fecha e a linha continua 'Not connected'"]},
+    {"do": "Clique **Connect** de novo"},
+    {"do": "No diálogo, clique **Connect**"},
+    {"do": "No Mock IdP, clique em **lara.link@orion.test**",
+     "expect": ["Volta para /settings/general (não para uma página 'Connected accounts')",
+                "Banner 'Account linked successfully.' no card"]}
+  ]
+  ```
 
 **What the plan covers — fewer items, same quality** (Alice, 2026-11-07). Neither nitpicky nor generic:
 - **In:** usability of the happy paths; error handling — try to break it (invalid/empty input,
@@ -282,8 +309,9 @@ failures, the mini model to pick, traps); items: `actions` = the route (screen �
   of the same path into separate items:
   - ✗ `UI-001` "o botão Export aparece no menu, com o texto 'Export flow'" · `UI-002` "clique em
     Export e veja o que acontece"
-  - ✓ `UI-001` actions "Menu do flow → Export flow → Download"; expected "'Export flow' visível e
-    habilitado no menu → abre o modal 'Export' com o nome do flow → baixa `<nome>.json`"
+  - ✓ `UI-001` steps: 1. "Abra o menu do flow" ✓ "'Export flow' visível e habilitado" · 2. "Clique
+    **Export flow**" ✓ "Abre o modal 'Export' com o nome do flow" · 3. "Clique **Download**" ✓ "Baixa
+    `<nome>.json`"
 - A new item only when the route changes: another screen or entry point the diff touches, another
   persona, the error path vs the happy path. The same check on N flows → one representative, unless
   the diff changes each.
